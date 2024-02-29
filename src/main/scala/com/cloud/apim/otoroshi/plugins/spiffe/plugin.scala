@@ -4,19 +4,22 @@ import akka.stream.Materializer
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.cloud.apim.otoroshi.plugins.spiffe.{SpiffeCertSource, SpiffeConfig, SpiffeContext, SpiffeJwtSource}
+import com.google.common.base.Charsets
+import io.spiffe.svid.x509svid.X509Svid
 import otoroshi.env.Env
 import otoroshi.gateway.Errors
 import otoroshi.next.plugins.api._
 import otoroshi.script._
-import otoroshi.security.IdGenerator
 import otoroshi.ssl.Cert
-import otoroshi.ssl.SSLImplicits.EnhancedCertificate
+import otoroshi.ssl.SSLImplicits._
 import otoroshi.utils.http.DN
 import otoroshi.utils.syntax.implicits._
 import play.api.libs.json.{JsObject, JsSuccess, JsValue, Json}
 import play.api.mvc.{Result, Results}
 
+import java.security.cert.X509Certificate
 import java.security.interfaces.{ECPublicKey, RSAPublicKey}
+import java.util.Base64
 import scala.concurrent._
 import scala.concurrent.duration.{DurationInt, DurationLong, FiniteDuration}
 import scala.jdk.CollectionConverters._
@@ -112,17 +115,82 @@ class SpiffeClientCertRequest extends NgRequestTransformer {
     })
   }
 
+  private def computeCertId(cert: X509Certificate): String = {
+    "cert_" + new String(Base64.getEncoder.encode(cert.getSignature), Charsets.UTF_8)
+  }
+
+  private def registerMissingCerts(certs: Seq[X509Certificate])(implicit env: Env, executionContext: ExecutionContext): Unit = {
+    certs.foreach { cert =>
+      val id = computeCertId(cert)
+      if (env.proxyState.certificate(id).isEmpty) {
+        val ncert = Cert(
+          id = id,
+          name = s"SPIFFE temporary cert",
+          description = s"SPIFFE temporary cert",
+          chain = cert.asPem,
+          privateKey = "",
+          caRef = None,
+          autoRenew = false,
+          client = false,
+          exposed = false,
+          revoked = false,
+          entityMetadata = Map("spiffe-gen-cert" -> "true")
+        ).enrich()
+        val certs = env.proxyState.allCertificates() ++ Seq(ncert)
+        env.proxyState.updateCertificates(certs)
+        ncert.save().map(_ => ())
+      }
+    }
+  }
+
+  private def registerMissingCert(svid: X509Svid)(implicit env: Env, executionContext: ExecutionContext): Unit = {
+    val id = computeCertId(svid.getLeaf)
+    if (env.proxyState.certificate(id).isEmpty) {
+      val ncert = Cert(
+        id = id,
+        name = s"SPIFFE temporary cert",
+        description = s"SPIFFE temporary cert",
+        chain = svid.getChain.asScala.map(_.asPem).mkString("\n\n"),
+        privateKey = svid.getPrivateKey.asPem,
+        caRef = None,
+        autoRenew = false,
+        client = false,
+        exposed = false,
+        revoked = false,
+        entityMetadata = Map("spiffe-gen-cert" -> "true")
+      ).enrich()
+      val certs = env.proxyState.allCertificates() ++ Seq(ncert)
+      env.proxyState.updateCertificates(certs)
+      ncert.save().map(_ => ())
+    }
+  }
+
   override def transformRequest(ctx: NgTransformerRequestContext)(implicit env: Env, ec: ExecutionContext, mat: Materializer): Future[Either[Result, NgPluginHttpRequest]] = {
     val pluginConfig = ctx
       .cachedConfig(internalName)(SpiffeConfig.format)
       .getOrElse(SpiffeConfig.default)
     val source = getSource(pluginConfig)
-    source.getSvid().flatMap { svid =>
+    for {
+      bundle <- source.getBundle()
+      svid <- source.getSvid()
+    } yield {
+      registerMissingCerts(bundle.getX509Authorities.asScala.toSeq)
+      registerMissingCert(svid)
+      val svidId = computeCertId(svid.getLeaf)
       ctx.otoroshiRequest.copy(
         clientCertificateChain = () => {
           svid.getChain.asScala.some
+        },
+        backend = ctx.otoroshiRequest.backend.map { target =>
+          target.copy(
+            tlsConfig = target.tlsConfig.copy(
+              enabled = true,
+              certs = Seq(svidId),
+              trustedCerts = bundle.getX509Authorities.asScala.toSeq.map(c => computeCertId(c))
+            )
+          )
         }
-      ).rightf
+      ).right
     }
   }
 }
@@ -300,7 +368,7 @@ class SpiffeJwtRequest extends NgRequestTransformer {
   ))
 
 
-   def start(env: Env): Future[Unit] = {
+   override def start(env: Env): Future[Unit] = {
      env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
      ().vfuture
    }
@@ -360,19 +428,13 @@ class SpiffeCertPreloadJob extends Job {
     )
 
   override def jobVisibility: JobVisibility = JobVisibility.UserLand
-
   override def kind: JobKind = JobKind.ScheduledEvery
-
   override def starting: JobStarting = JobStarting.FromConfiguration
+  override def instantiation(ctx: JobContext, env: Env): JobInstantiation = JobInstantiation.OneInstancePerOtoroshiCluster
+  override def initialDelay(ctx: JobContext, env: Env): Option[FiniteDuration] = 1.seconds.some
+  override def interval(ctx: JobContext, env: Env): Option[FiniteDuration] = 10.seconds.some
 
-  override def instantiation(ctx: JobContext, env: Env): JobInstantiation =
-    JobInstantiation.OneInstancePerOtoroshiCluster
-
-  override def initialDelay(ctx: JobContext, env: Env): Option[FiniteDuration] = 5.seconds.some
-
-  override def interval(ctx: JobContext, env: Env): Option[FiniteDuration] = 60.seconds.some
-
-   def start(env: Env): Future[Unit] = {
+   override def start(env: Env): Future[Unit] = {
      env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
      ().vfuture
    }
@@ -381,6 +443,74 @@ class SpiffeCertPreloadJob extends Job {
     SpiffeContext.certSourcesCache.get(config.cacheKey, _ => {
       SpiffeCertSource(config)
     })
+  }
+
+  private def storeCurrentSvid(source: SpiffeCertSource)(implicit env: Env, ec: ExecutionContext): Future[Unit] = {
+    source.getSvid().flatMap { svid =>
+      val leaf = svid.getLeaf
+      val id = "cert_" + new String(Base64.getEncoder.encode(leaf.getSignature), Charsets.UTF_8)
+      val cert = Cert(
+        id = id,
+        name = s"SPIFFE SVID",
+        description = s"SPIFFE SVID",
+        chain = svid.getChain.asScala.map(_.asPem).mkString("\n\n"),
+        privateKey = svid.getPrivateKey.asPem,
+        caRef = None,
+        autoRenew = false,
+        client = false,
+        exposed = false,
+        revoked = false,
+        entityMetadata = Map("spiffe-gen-cert" -> "true")
+      )
+      .enrich()
+      if (env.proxyState.certificate(id).isEmpty) {
+        val certs = env.proxyState.allCertificates() ++ Seq(cert)
+        env.proxyState.updateCertificates(certs)
+        cert.save().map(_ => ())
+      } else {
+        ().vfuture
+      }
+    }.map(_ => ())
+  }
+
+  private def storeAuthorities(source: SpiffeCertSource, config: SpiffeConfig)(implicit env: Env, ec: ExecutionContext): Future[Unit] = {
+    source.getBundle().flatMap { bundle =>
+      Future.sequence(bundle.getX509Authorities.asScala.toSeq.map { authority =>
+        val id = "cert_" + new String(Base64.getEncoder.encode(authority.getSignature), Charsets.UTF_8)
+        val cert = Cert(
+          id = id,
+          name = s"SPIFFE CA for ${config.domain}",
+          description = s"SPIFFE CA for ${config.domain}",
+          chain = authority.asPem,
+          privateKey = "",
+          caRef = None,
+          autoRenew = false,
+          client = false,
+          exposed = false,
+          revoked = false,
+          entityMetadata = Map("spiffe-gen-cert" -> "true")
+        ).enrich()
+        if (env.proxyState.certificate(id).isEmpty) {
+          // TODO: use hasCert/addCert
+          val certs = env.proxyState.allCertificates() ++ Seq(cert)
+          env.proxyState.updateCertificates(certs)
+          cert.save().map(_ => ())
+        } else {
+          ().vfuture
+        }
+      })
+    }.map(_ => ())
+  }
+
+  private def cleanupExpiredSpiffeCerts()(implicit env: Env, ec: ExecutionContext): Unit = {
+    env.proxyState.allCertificates().foreach { cert =>
+      if (cert.expired && cert.entityMetadata.get("spiffe-gen-cert").contains("true")) {
+        // TODO: use removeCert
+        val certs = env.proxyState.allCertificates().filterNot(_.id == cert.id)
+        env.proxyState.updateCertificates(certs)
+        cert.delete()
+      }
+    }
   }
 
   override def jobRun(ctx: JobContext)(implicit env: Env, ec: ExecutionContext): Future[Unit] = {
@@ -399,25 +529,15 @@ class SpiffeCertPreloadJob extends Job {
         case JsSuccess(value, path) => value
       }
     val configs: Seq[SpiffeConfig] = (configDomains ++ routeDomains).distinct
+
+    cleanupExpiredSpiffeCerts()
     Future.sequence(configs.map { config =>
-      getSource(config).getBundle().flatMap { bundle =>
-        Future.sequence(bundle.getX509Authorities.asScala.toSeq.map { authority =>
-          Cert(
-            id = "cert_" + IdGenerator.uuid,
-            name = s"SPIFFE CA for ${config.domain}",
-            description = s"SPIFFE CA for ${config.domain}",
-            chain = authority.asPem,
-            privateKey = "",
-            caRef = None,
-            autoRenew = false,
-            client = false,
-            exposed = false,
-            revoked = false
-          )
-          .enrich()
-          .save()
-        })
-      }
+      val source = getSource(config)
+      for {
+        _ <- storeCurrentSvid(source)
+        _ <- storeAuthorities(source, config)
+      } yield ()
     }).map(_ => ())
   }
+
 }
