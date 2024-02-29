@@ -11,6 +11,16 @@ lazy val root = (project in file("."))
     resolvers += "jitpack" at "https://jitpack.io",
     assembly / test  := {},
     assembly / assemblyJarName := "otoroshi-plugin-spiffe-assembly_2.12-dev.jar",
+    assembly / assemblyMergeStrategy := { e =>
+      e match {
+        case PathList("io", "spiffe", xs @ _*) => MergeStrategy.first
+        case PathList(ps @ _*) if ps.contains("module-info.class")          => MergeStrategy.first
+        case PathList(ps @ _*) if ps.last == "io.netty.versions.properties" => MergeStrategy.first
+        case x =>
+          val oldStrategy = (assembly / assemblyMergeStrategy).value
+          oldStrategy(x)
+      }
+    },
     libraryDependencies ++= Seq(
       "fr.maif" %% "otoroshi" % "16.14.0" % "provided",
       "io.spiffe" % "java-spiffe-core" % "0.8.5",
