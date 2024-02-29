@@ -35,7 +35,7 @@ class SpiffeClientCertValidator extends NgAccessValidator {
   override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.AccessControl, NgPluginCategory.Security)
   override def steps: Seq[NgStep]                          = Seq(NgStep.ValidateAccess)
   override def defaultConfigObject: Option[NgPluginConfig] = SpiffeConfig.default.some
-  def noJsForm: Boolean = true
+  override def noJsForm: Boolean = true
   override def configFlow: Seq[String] = SpiffeConfig.configFlow
   override def configSchema: Option[JsObject] = SpiffeConfig.configSchema
 
@@ -45,10 +45,10 @@ class SpiffeClientCertValidator extends NgAccessValidator {
     })
   }
 
-   def start(env: Env): Future[Unit] = {
-     env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
-     ().vfuture
-   }
+  override def start(env: Env): Future[Unit] = {
+    env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
+    ().vfuture
+  }
 
   override def access(ctx: NgAccessContext)(implicit env: Env, ec: ExecutionContext): Future[NgAccess] = {
     val pluginConfig = ctx
@@ -105,7 +105,7 @@ class SpiffeClientCertRequest extends NgRequestTransformer {
   override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.Security)
   override def steps: Seq[NgStep]                          = Seq(NgStep.TransformRequest)
   override def defaultConfigObject: Option[NgPluginConfig] = SpiffeConfig.default.some
-  def noJsForm: Boolean = true
+  override def noJsForm: Boolean = true
   override def configFlow: Seq[String] = SpiffeConfig.configFlow
   override def configSchema: Option[JsObject] = SpiffeConfig.configSchema
 
@@ -208,7 +208,7 @@ class SpiffeJwtValidator extends NgAccessValidator {
     "header_name" -> "Authorization",
     "header_prefix" -> "Bearer ",
   )).some
-  def noJsForm: Boolean = true
+  override def noJsForm: Boolean = true
   override def configFlow: Seq[String] = SpiffeConfig.configFlow ++ Seq(
     "audience",
     "extra_audience",
@@ -240,10 +240,10 @@ class SpiffeJwtValidator extends NgAccessValidator {
     })
   }
 
-   def start(env: Env): Future[Unit] = {
-     env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
-     ().vfuture
-   }
+  override def start(env: Env): Future[Unit] = {
+    env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
+    ().vfuture
+  }
 
   override def access(ctx: NgAccessContext)(implicit env: Env, ec: ExecutionContext): Future[NgAccess] = {
     val pluginConfig = ctx
@@ -341,7 +341,7 @@ class SpiffeJwtRequest extends NgRequestTransformer {
     "header_name" -> "Authorization",
     "header_prefix" -> "Bearer ",
   )).some
-  def noJsForm: Boolean = true
+  override def noJsForm: Boolean = true
   override def configFlow: Seq[String] = SpiffeConfig.configFlow ++ Seq(
     "audience",
     "extra_audience",
