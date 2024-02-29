@@ -42,6 +42,11 @@ class SpiffeClientCertValidator extends NgAccessValidator {
     })
   }
 
+   def start(env: Env): Future[Unit] = {
+     env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
+     ().vfuture
+   }
+
   override def access(ctx: NgAccessContext)(implicit env: Env, ec: ExecutionContext): Future[NgAccess] = {
     val pluginConfig = ctx
       .cachedConfig(internalName)(SpiffeConfig.format)
@@ -167,6 +172,11 @@ class SpiffeJwtValidator extends NgAccessValidator {
     })
   }
 
+   def start(env: Env): Future[Unit] = {
+     env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
+     ().vfuture
+   }
+
   override def access(ctx: NgAccessContext)(implicit env: Env, ec: ExecutionContext): Future[NgAccess] = {
     val pluginConfig = ctx
       .cachedConfig(internalName)(SpiffeConfig.format)
@@ -289,6 +299,12 @@ class SpiffeJwtRequest extends NgRequestTransformer {
     ),
   ))
 
+
+   def start(env: Env): Future[Unit] = {
+     env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
+     ().vfuture
+   }
+
   private def getSource(config: SpiffeConfig): SpiffeJwtSource = SpiffeContext.jwtSourcesCache.synchronized {
     SpiffeContext.jwtSourcesCache.get(config.cacheKey, _ => {
       SpiffeJwtSource(config)
@@ -355,6 +371,11 @@ class SpiffeCertPreloadJob extends Job {
   override def initialDelay(ctx: JobContext, env: Env): Option[FiniteDuration] = 5.seconds.some
 
   override def interval(ctx: JobContext, env: Env): Option[FiniteDuration] = 60.seconds.some
+
+   def start(env: Env): Future[Unit] = {
+     env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
+     ().vfuture
+   }
 
   private def getSource(config: SpiffeConfig): SpiffeCertSource = SpiffeContext.certSourcesCache.synchronized {
     SpiffeContext.certSourcesCache.get(config.cacheKey, _ => {
