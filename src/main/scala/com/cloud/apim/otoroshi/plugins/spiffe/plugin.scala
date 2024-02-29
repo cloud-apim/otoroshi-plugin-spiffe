@@ -27,7 +27,7 @@ import scala.util._
 
 class SpiffeClientCertValidator extends NgAccessValidator {
 
-  override def name: String                                = "SPIFFE client cert validator"
+  override def name: String                                = "Cloud APIM - SPIFFE client cert validator"
   override def description: Option[String]                 = "This plugin validates if the incoming request has been made with a SPIFFE generated client certificate".some
   override def multiInstance: Boolean                      = true
   override def core: Boolean                               = false
@@ -97,7 +97,7 @@ class SpiffeClientCertValidator extends NgAccessValidator {
 
 class SpiffeClientCertRequest extends NgRequestTransformer {
 
-  override def name: String                                = "SPIFFE client cert request"
+  override def name: String                                = "Cloud APIM - SPIFFE client cert request"
   override def description: Option[String]                 = "This plugin injects a SPIFFE client certificate in the current request".some
   override def multiInstance: Boolean                      = true
   override def core: Boolean                               = false
@@ -197,7 +197,7 @@ class SpiffeClientCertRequest extends NgRequestTransformer {
 
 class SpiffeJwtValidator extends NgAccessValidator {
 
-  override def name: String                                = "SPIFFE JWT validator"
+  override def name: String                                = "Cloud APIM - SPIFFE JWT validator"
   override def description: Option[String]                 = "This plugin validates if the incoming request has been made with a SPIFFE generated JWT token".some
   override def multiInstance: Boolean                      = true
   override def core: Boolean                               = false
@@ -330,7 +330,7 @@ case class JsonNgPluginConfig(raw: JsValue) extends NgPluginConfig {
 
 class SpiffeJwtRequest extends NgRequestTransformer {
 
-  override def name: String                                = "SPIFFE client cert request"
+  override def name: String                                = "Cloud APIM - SPIFFE client cert request"
   override def description: Option[String]                 = "This plugin injects a SPIFFE client certificate in the current request".some
   override def multiInstance: Boolean                      = true
   override def core: Boolean                               = false
@@ -406,7 +406,7 @@ class SpiffeCertPreloadJob extends Job {
 
   override def uniqueId: JobId = JobId("com.cloud-apim.plugins.spiffe.SpiffeCertPreloadJob")
 
-  override def name: String = "SPIFFE CA Cert preloader"
+  override def name: String = "Cloud APIM - SPIFFE CA Cert preloader"
 
   override def defaultConfig: Option[JsObject] = Some(Json.obj("domains" -> Json.arr()))
   override def configFlow: Seq[String] = Seq("domains")
