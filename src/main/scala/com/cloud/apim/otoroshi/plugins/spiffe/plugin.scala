@@ -330,7 +330,7 @@ case class JsonNgPluginConfig(raw: JsValue) extends NgPluginConfig {
 
 class SpiffeJwtRequest extends NgRequestTransformer {
 
-  override def name: String                                = "Cloud APIM - SPIFFE client cert request"
+  override def name: String                                = "Cloud APIM - SPIFFE JWT request"
   override def description: Option[String]                 = "This plugin injects a SPIFFE client certificate in the current request".some
   override def multiInstance: Boolean                      = true
   override def core: Boolean                               = false
