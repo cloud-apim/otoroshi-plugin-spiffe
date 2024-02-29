@@ -32,7 +32,7 @@ class SpiffeClientCertValidator extends NgAccessValidator {
   override def multiInstance: Boolean                      = true
   override def core: Boolean                               = false
   override def visibility: NgPluginVisibility              = NgPluginVisibility.NgUserLand
-  override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.AccessControl, NgPluginCategory.Security)
+  override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.AccessControl, NgPluginCategory.Security, NgPluginCategory.Custom("Cloud APIM"))
   override def steps: Seq[NgStep]                          = Seq(NgStep.ValidateAccess)
   override def defaultConfigObject: Option[NgPluginConfig] = SpiffeConfig.default.some
   override def noJsForm: Boolean = true
@@ -102,7 +102,7 @@ class SpiffeClientCertRequest extends NgRequestTransformer {
   override def multiInstance: Boolean                      = true
   override def core: Boolean                               = false
   override def visibility: NgPluginVisibility              = NgPluginVisibility.NgUserLand
-  override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.Security)
+  override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.Security, NgPluginCategory.Custom("Cloud APIM"))
   override def steps: Seq[NgStep]                          = Seq(NgStep.TransformRequest)
   override def defaultConfigObject: Option[NgPluginConfig] = SpiffeConfig.default.some
   override def noJsForm: Boolean = true
@@ -207,7 +207,7 @@ class SpiffeJwtValidator extends NgAccessValidator {
   override def multiInstance: Boolean                      = true
   override def core: Boolean                               = false
   override def visibility: NgPluginVisibility              = NgPluginVisibility.NgUserLand
-  override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.AccessControl, NgPluginCategory.Security)
+  override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.AccessControl, NgPluginCategory.Security, NgPluginCategory.Custom("Cloud APIM"))
   override def steps: Seq[NgStep]                          = Seq(NgStep.ValidateAccess)
   override def defaultConfigObject: Option[NgPluginConfig] = JsonNgPluginConfig(SpiffeConfig.default.json.asObject ++ Json.obj(
     "header_name" -> "Authorization",
@@ -340,7 +340,7 @@ class SpiffeJwtRequest extends NgRequestTransformer {
   override def multiInstance: Boolean                      = true
   override def core: Boolean                               = false
   override def visibility: NgPluginVisibility              = NgPluginVisibility.NgUserLand
-  override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.Security)
+  override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.Security, NgPluginCategory.Custom("Cloud APIM"))
   override def steps: Seq[NgStep]                          = Seq(NgStep.TransformRequest)
   override def defaultConfigObject: Option[NgPluginConfig] = JsonNgPluginConfig(SpiffeConfig.default.json.asObject ++ Json.obj(
     "header_name" -> "Authorization",
