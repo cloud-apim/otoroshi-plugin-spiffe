@@ -13,13 +13,10 @@ import otoroshi.ssl.Cert
 import otoroshi.ssl.SSLImplicits.EnhancedCertificate
 import otoroshi.utils.http.DN
 import otoroshi.utils.syntax.implicits._
-import play.api.libs.json.{JsObject, JsSuccess, Json}
+import play.api.libs.json.{JsObject, JsSuccess, JsValue, Json}
 import play.api.mvc.{Result, Results}
 
-import java.security.KeyPair
-import java.security.cert.X509Certificate
 import java.security.interfaces.{ECPublicKey, RSAPublicKey}
-import scala.collection.mutable
 import scala.concurrent._
 import scala.concurrent.duration.{DurationInt, DurationLong, FiniteDuration}
 import scala.jdk.CollectionConverters._
@@ -134,10 +131,35 @@ class SpiffeJwtValidator extends NgAccessValidator {
   override def visibility: NgPluginVisibility              = NgPluginVisibility.NgUserLand
   override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.AccessControl, NgPluginCategory.Security)
   override def steps: Seq[NgStep]                          = Seq(NgStep.ValidateAccess)
-  override def defaultConfigObject: Option[NgPluginConfig] = SpiffeConfig.default.some
+  override def defaultConfigObject: Option[NgPluginConfig] = JsonNgPluginConfig(SpiffeConfig.default.json.asObject ++ Json.obj(
+    "header_name" -> "Authorization",
+    "header_prefix" -> "Bearer ",
+  )).some
   def noJsForm: Boolean = true
-  override def configFlow: Seq[String] = SpiffeConfig.configFlow
-  override def configSchema: Option[JsObject] = SpiffeConfig.configSchema
+  override def configFlow: Seq[String] = SpiffeConfig.configFlow ++ Seq(
+    "audience",
+    "extra_audience",
+    "header_name",
+    "header_prefix",
+  )
+  override def configSchema: Option[JsObject] = SpiffeConfig.configSchema.map(_.asObject ++ Json.obj(
+    "audience" -> Json.obj(
+      "type" -> "string",
+      "label" -> "JWT audience",
+    ),
+    "extra_audience" -> Json.obj(
+      "type" -> "array",
+      "label" -> "JWT extra audience",
+    ),
+    "header_name" -> Json.obj(
+      "type" -> "string",
+      "label" -> "JWT header name",
+    ),
+    "header_prefix" -> Json.obj(
+      "type" -> "string",
+      "label" -> "JWT header prefix",
+    ),
+  ))
 
   private def getSource(config: SpiffeConfig): SpiffeJwtSource = SpiffeContext.jwtSourcesCache.synchronized {
     SpiffeContext.jwtSourcesCache.get(config.cacheKey, _ => {
@@ -149,6 +171,11 @@ class SpiffeJwtValidator extends NgAccessValidator {
     val pluginConfig = ctx
       .cachedConfig(internalName)(SpiffeConfig.format)
       .getOrElse(SpiffeConfig.default)
+    val moreConfig = ctx
+      .cachedConfigFn(internalName)(v => v.some)
+      .getOrElse(Json.obj())
+    val audience = moreConfig.select("audience").asOpt[String].filterNot(_.trim.isBlank)
+    val extraAudience = moreConfig.select("extra_audience").asOpt[Seq[String]].getOrElse(Seq.empty)
     ctx.request.headers.get("Authorization").map(_.replace("Bearer ", "").replace("bearer ", "")) match {
       case Some(bearer) if bearer.split("\\.").length == 3 => {
         val source = getSource(pluginConfig)
@@ -181,7 +208,8 @@ class SpiffeJwtValidator extends NgAccessValidator {
                 case "RS512" => Algorithm.RSA512(auth.asInstanceOf[RSAPublicKey], null).some
                 case _ => None
               }
-              Try(JWT.require(algo.get).acceptLeeway(10).build().verify(bearer)) match {
+              val audiences: Seq[String] = (Seq.empty ++ extraAudience ++ audience).distinct
+              Try(JWT.require(algo.get).acceptLeeway(10).applyOnIf(audiences.nonEmpty)(_.withAudience(audiences:_*)).build().verify(bearer)) match {
                 case Success(s) => NgAccess.NgAllowed.vfuture
                 case Failure(e) => {
                   Errors
@@ -218,6 +246,10 @@ class SpiffeJwtValidator extends NgAccessValidator {
   }
 }
 
+case class JsonNgPluginConfig(raw: JsValue) extends NgPluginConfig {
+  def json: JsValue = raw
+}
+
 class SpiffeJwtRequest extends NgRequestTransformer {
 
   override def name: String                                = "SPIFFE client cert request"
@@ -227,11 +259,16 @@ class SpiffeJwtRequest extends NgRequestTransformer {
   override def visibility: NgPluginVisibility              = NgPluginVisibility.NgUserLand
   override def categories: Seq[NgPluginCategory]           = Seq(NgPluginCategory.Security)
   override def steps: Seq[NgStep]                          = Seq(NgStep.TransformRequest)
-  override def defaultConfigObject: Option[NgPluginConfig] = SpiffeConfig.default.some
+  override def defaultConfigObject: Option[NgPluginConfig] = JsonNgPluginConfig(SpiffeConfig.default.json.asObject ++ Json.obj(
+    "header_name" -> "Authorization",
+    "header_prefix" -> "Bearer ",
+  )).some
   def noJsForm: Boolean = true
   override def configFlow: Seq[String] = SpiffeConfig.configFlow ++ Seq(
     "audience",
     "extra_audience",
+    "header_name",
+    "header_prefix",
   )
   override def configSchema: Option[JsObject] = SpiffeConfig.configSchema.map(_.asObject ++ Json.obj(
     "audience" -> Json.obj(
@@ -241,6 +278,14 @@ class SpiffeJwtRequest extends NgRequestTransformer {
     "extra_audience" -> Json.obj(
       "type" -> "array",
       "label" -> "JWT extra audience",
+    ),
+    "header_name" -> Json.obj(
+      "type" -> "string",
+      "label" -> "JWT header name",
+    ),
+    "header_prefix" -> Json.obj(
+      "type" -> "string",
+      "label" -> "JWT header prefix",
     ),
   ))
 
@@ -258,12 +303,14 @@ class SpiffeJwtRequest extends NgRequestTransformer {
       .cachedConfigFn(internalName)(v => v.some)
       .getOrElse(Json.obj())
     val source = getSource(pluginConfig)
-    val audience = moreConfig.select("audience").asOpt[String].getOrElse(ctx.route.name)
+    val audience = moreConfig.select("audience").asOpt[String].filterNot(_.trim.isBlank).getOrElse(ctx.route.name)
     val extraAudience = moreConfig.select("extra_audience").asOpt[Seq[String]].getOrElse(Seq.empty)
+    val headerName = moreConfig.select("header_name").asOpt[String].filterNot(_.trim.isBlank).getOrElse("Authorization")
+    val headerPrefix = moreConfig.select("header_prefix").asOpt[String].filterNot(_.trim.isBlank).getOrElse("Bearer ")
     source.getSvid(audience, extraAudience = extraAudience).flatMap { svid =>
       ctx.otoroshiRequest.copy(
         headers = ctx.otoroshiRequest.headers ++ Map(
-          "Authorization" -> s"Bearer ${svid.getToken}"
+          headerName -> s"${headerPrefix}${svid.getToken}"
         )
       ).rightf
     }
