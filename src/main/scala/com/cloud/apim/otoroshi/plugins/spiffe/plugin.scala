@@ -46,7 +46,7 @@ class SpiffeClientCertValidator extends NgAccessValidator {
   }
 
   override def start(env: Env): Future[Unit] = {
-    env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
+    env.logger.info(s"[Cloud APIM] the '${name.replaceFirst("Cloud APIM - ", "")}' plugin is available !")
     ().vfuture
   }
 
@@ -108,6 +108,11 @@ class SpiffeClientCertRequest extends NgRequestTransformer {
   override def noJsForm: Boolean = true
   override def configFlow: Seq[String] = SpiffeConfig.configFlow
   override def configSchema: Option[JsObject] = SpiffeConfig.configSchema
+
+  override def start(env: Env): Future[Unit] = {
+    env.logger.info(s"[Cloud APIM] the '${name.replaceFirst("Cloud APIM - ", "")}' plugin is available !")
+    ().vfuture
+  }
 
   private def getSource(config: SpiffeConfig): SpiffeCertSource = SpiffeContext.certSourcesCache.synchronized {
     SpiffeContext.certSourcesCache.get(config.cacheKey, _ => {
@@ -241,7 +246,7 @@ class SpiffeJwtValidator extends NgAccessValidator {
   }
 
   override def start(env: Env): Future[Unit] = {
-    env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
+    env.logger.info(s"[Cloud APIM] the '${name.replaceFirst("Cloud APIM - ", "")}' plugin is available !")
     ().vfuture
   }
 
@@ -369,7 +374,7 @@ class SpiffeJwtRequest extends NgRequestTransformer {
 
 
    override def start(env: Env): Future[Unit] = {
-     env.logger.info(s"[Cloud APIM] the '${name}' plugin is available !")
+     env.logger.info(s"[Cloud APIM] the '${name.replaceFirst("Cloud APIM - ", "")}' plugin is available !")
      ().vfuture
    }
 
