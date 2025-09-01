@@ -22,7 +22,7 @@ lazy val root = (project in file("."))
       }
     },
     libraryDependencies ++= Seq(
-      "fr.maif" %% "otoroshi" % "17.3.0" % "provided",
+      "fr.maif" %% "otoroshi" % "17.5.0" % "provided",
       "io.spiffe" % "java-spiffe-core" % "0.8.5",
       "io.spiffe" % "grpc-netty-macos-aarch64" % "0.8.5",
       "io.spiffe" % "grpc-netty-macos" % "0.8.5",
