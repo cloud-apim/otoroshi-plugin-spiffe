@@ -1,45 +1,65 @@
 package com.cloud.apim.otoroshi.plugins.spiffe
 
-import com.github.blemale.scaffeine.Scaffeine
+import com.github.blemale.scaffeine.{Cache, Scaffeine}
 import io.spiffe.bundle.jwtbundle.JwtBundle
 import io.spiffe.bundle.x509bundle.X509Bundle
 import io.spiffe.spiffeid.{SpiffeId, TrustDomain}
 import io.spiffe.svid.jwtsvid.JwtSvid
 import io.spiffe.svid.x509svid.X509Svid
-import io.spiffe.workloadapi._
+import io.spiffe.workloadapi.*
 import otoroshi.next.plugins.api.NgPluginConfig
-import otoroshi.utils.syntax.implicits._
-import play.api.libs.json._
+import otoroshi.utils.syntax.implicits.*
+import play.api.libs.json.*
 
+import java.security.cert.X509Certificate
 import java.time.temporal.ChronoUnit
+import java.util.Base64
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.duration.{DurationLong, FiniteDuration}
-import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.jdk.CollectionConverters._
-import scala.util._
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutorService, Future, Promise}
+import scala.util.*
+
+extension (cert: X509Certificate) {
+  /** stable otoroshi entity id for a SPIFFE delivered certificate */
+  def spiffeCertId: String = s"cert_${Base64.getEncoder.encodeToString(cert.getSignature)}"
+}
 
 object SpiffeContext {
-  val ec = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(Runtime.getRuntime.availableProcessors()))
-  val certSourcesCache = Scaffeine()
+
+  val ec: ExecutionContextExecutorService =
+    ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(Runtime.getRuntime.availableProcessors()))
+
+  private val certSourcesCache: Cache[String, SpiffeCertSource] = Scaffeine()
     .maximumSize(100)
     .build[String, SpiffeCertSource]()
-  val jwtSourcesCache = Scaffeine()
+
+  private val jwtSourcesCache: Cache[String, SpiffeJwtSource] = Scaffeine()
     .maximumSize(100)
     .build[String, SpiffeJwtSource]()
+
+  def certSource(config: SpiffeConfig): SpiffeCertSource = certSourcesCache.synchronized {
+    certSourcesCache.get(config.cacheKey, _ => SpiffeCertSource(config))
+  }
+
+  def jwtSource(config: SpiffeConfig): SpiffeJwtSource = jwtSourcesCache.synchronized {
+    jwtSourcesCache.get(config.cacheKey, _ => SpiffeJwtSource(config))
+  }
 }
 
 case class SpiffeConfig(domain: String, socketPath: Option[String] = None, timeout: Option[FiniteDuration] = None) extends NgPluginConfig {
   override def json: JsValue = SpiffeConfig.format.writes(this)
-  def cacheKey: String = s"${domain}:::${socketPath.getOrElse("default")}:::${timeout.getOrElse("default")}"
+  def cacheKey: String = s"${domain}:::${socketPath.getOrElse("default")}:::${timeout.fold("default")(_.toMillis.toString)}"
 }
 
 object SpiffeConfig {
+
   val configFlow: Seq[String] = Seq(
     "domain",
     "socket_path",
     "timeout",
   )
+
   val configSchema: Option[JsObject] = Json.obj(
     "domain" -> Json.obj(
       "type" -> "string",
@@ -58,8 +78,11 @@ object SpiffeConfig {
       )
     )
   ).some
-  val default = SpiffeConfig("example.org", "unix:///tmp/spire-agent/public/api.sock".some, 10.seconds.some)
-  val format = new Format[SpiffeConfig] {
+
+  val default: SpiffeConfig = SpiffeConfig("example.org", "unix:///tmp/spire-agent/public/api.sock".some, 10.seconds.some)
+
+  given format: Format[SpiffeConfig] = new Format[SpiffeConfig] {
+
     override def reads(json: JsValue): JsResult[SpiffeConfig] = Try {
       SpiffeConfig(
         domain = json.select("domain").asString,
@@ -79,10 +102,6 @@ object SpiffeConfig {
   }
 }
 
-object SpiffeCertSource {
-  def apply(config: SpiffeConfig): SpiffeCertSource = new SpiffeCertSource(config)
-}
-
 class SpiffeCertSource(config: SpiffeConfig) {
 
   private val initialized = new AtomicBoolean(false)
@@ -95,11 +114,11 @@ class SpiffeCertSource(config: SpiffeConfig) {
       try {
         val options = DefaultX509Source.X509SourceOptions
           .builder()
-          .applyOnWithOpt(config.timeout) {
-            case (builder, timeout) => builder.initTimeout(java.time.Duration.of(timeout.toMillis, ChronoUnit.MILLIS))
+          .applyOnWithOpt(config.timeout) { (builder, timeout) =>
+            builder.initTimeout(java.time.Duration.of(timeout.toMillis, ChronoUnit.MILLIS))
           }
-          .applyOnWithOpt(config.socketPath) {
-            case (builder, path) => builder.spiffeSocketPath(path)
+          .applyOnWithOpt(config.socketPath) { (builder, path) =>
+            builder.spiffeSocketPath(path)
           }
           .build()
         val x509Source = DefaultX509Source.newSource(options)
@@ -111,25 +130,22 @@ class SpiffeCertSource(config: SpiffeConfig) {
           promise.tryFailure(e)
           e.printStackTrace()
       }
-    }(SpiffeContext.ec)
+    }(using SpiffeContext.ec)
   }
 
-  def getBundle(domain: String = config.domain)(implicit ec: ExecutionContext): Future[X509Bundle] = {
+  private def source(): Future[DefaultX509Source] = {
     if (initialized.compareAndSet(false, true)) {
       init()
     }
-    promise.future.map { source =>
-      source.getBundleForTrustDomain(TrustDomain.parse(domain))
-    }
+    promise.future
   }
 
-  def getSvid()(implicit ec: ExecutionContext): Future[X509Svid] = {
-    if (initialized.compareAndSet(false, true)) {
-      init()
-    }
-    promise.future.map { source =>
-      source.getX509Svid
-    }
+  def getBundle(domain: String = config.domain)(using ec: ExecutionContext): Future[X509Bundle] = {
+    source().map(_.getBundleForTrustDomain(TrustDomain.parse(domain)))
+  }
+
+  def getSvid()(using ec: ExecutionContext): Future[X509Svid] = {
+    source().map(_.getX509Svid)
   }
 
   def close(): Future[Unit] = {
@@ -138,12 +154,8 @@ class SpiffeCertSource(config: SpiffeConfig) {
         // println("[cert] closing the source ...")
         ref.get().close()
       }
-    }(SpiffeContext.ec)
+    }(using SpiffeContext.ec)
   }
-}
-
-object SpiffeJwtSource {
-  def apply(config: SpiffeConfig): SpiffeJwtSource = new SpiffeJwtSource(config)
 }
 
 class SpiffeJwtSource(config: SpiffeConfig) {
@@ -156,15 +168,13 @@ class SpiffeJwtSource(config: SpiffeConfig) {
     // println("[jwt] initializing the source ...")
     Future {
       try {
-        JwtSourceOptions
-          .builder().build().toString
         val options = JwtSourceOptions
           .builder()
-          .applyOnWithOpt(config.timeout) {
-            case (builder, timeout) => builder.initTimeout(java.time.Duration.of(timeout.toMillis, ChronoUnit.MILLIS))
+          .applyOnWithOpt(config.timeout) { (builder, timeout) =>
+            builder.initTimeout(java.time.Duration.of(timeout.toMillis, ChronoUnit.MILLIS))
           }
-          .applyOnWithOpt(config.socketPath) {
-            case (builder, path) => builder.spiffeSocketPath(path)
+          .applyOnWithOpt(config.socketPath) { (builder, path) =>
+            builder.spiffeSocketPath(path)
           }
           .build()
         val jwtSource = DefaultJwtSource.newSource(options)
@@ -176,26 +186,25 @@ class SpiffeJwtSource(config: SpiffeConfig) {
           promise.tryFailure(e)
           e.printStackTrace()
       }
-    }(SpiffeContext.ec)
+    }(using SpiffeContext.ec)
   }
 
-  def getBundle(domain: String = config.domain)(implicit ec: ExecutionContext): Future[JwtBundle] = {
+  private def source(): Future[JwtSource] = {
     if (initialized.compareAndSet(false, true)) {
       init()
     }
-    promise.future.map { source =>
-      source.getBundleForTrustDomain(TrustDomain.parse(domain))
-    }
+    promise.future
   }
 
-  def getSvid(audience: String, id: Option[String] = None, extraAudience: Seq[String] = Seq.empty)(implicit ec: ExecutionContext): Future[JwtSvid] = {
-    if (initialized.compareAndSet(false, true)) {
-      init()
-    }
-    promise.future.map { source =>
+  def getBundle(domain: String = config.domain)(using ec: ExecutionContext): Future[JwtBundle] = {
+    source().map(_.getBundleForTrustDomain(TrustDomain.parse(domain)))
+  }
+
+  def getSvid(audience: String, id: Option[String] = None, extraAudience: Seq[String] = Seq.empty)(using ec: ExecutionContext): Future[JwtSvid] = {
+    source().map { src =>
       id match {
-        case None => source.fetchJwtSvid(audience, extraAudience: _*)
-        case Some(id) => source.fetchJwtSvid(SpiffeId.parse(id), audience, extraAudience: _*)
+        case None           => src.fetchJwtSvid(audience, extraAudience*)
+        case Some(spiffeId) => src.fetchJwtSvid(SpiffeId.parse(spiffeId), audience, extraAudience*)
       }
     }
   }
@@ -206,6 +215,6 @@ class SpiffeJwtSource(config: SpiffeConfig) {
         // println("[jwt] closing the source ...")
         ref.get().close()
       }
-    }(SpiffeContext.ec)
+    }(using SpiffeContext.ec)
   }
 }

@@ -3,18 +3,17 @@ package com.cloud.apim.otoroshi.plugins.spiffe.tests
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.cloud.apim.otoroshi.plugins.spiffe.{SpiffeCertSource, SpiffeConfig, SpiffeJwtSource}
-import otoroshi.utils.syntax.implicits._
+import otoroshi.utils.syntax.implicits.*
 
-import java.security.cert.X509Certificate
 import java.security.interfaces.ECPublicKey
 import java.util.concurrent.Executors
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.DurationInt
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 class SpiffeSourcesSpec extends munit.FunSuite {
 
-  implicit val ec = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(20))
+  given ec: ExecutionContext = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(20))
 
   val config = SpiffeConfig("example.org", "unix:///tmp/spire-agent/public/api.sock".some, 10.seconds.some)
   val jwtSource = SpiffeJwtSource(config)
@@ -26,8 +25,8 @@ class SpiffeSourcesSpec extends munit.FunSuite {
       svid <- certSource.getSvid()
       _ <- certSource.close()
     } yield {
-      println(s"just got a cert bundle of ${bundle.getX509Authorities.size()} authorities: ${bundle.getX509Authorities.asScala.map(_.getSubjectDN.getName)}")
-      svid.getLeaf.getSubjectDN.getName.debugPrintln
+      println(s"just got a cert bundle of ${bundle.getX509Authorities.size()} authorities: ${bundle.getX509Authorities.asScala.map(_.getSubjectX500Principal.getName)}")
+      svid.getLeaf.getSubjectX500Principal.getName.debugPrintln
       svid.getPrivateKey.getFormat.debugPrintln
     }
   }
@@ -46,7 +45,6 @@ class SpiffeSourcesSpec extends munit.FunSuite {
         part.parseJson.prettify.debugPrintln
       }
       val kid = parts(0).parseJson.select("kid").asString
-      val alg = parts(0).parseJson.select("alg").asString
       Option(bundle.getJwtAuthorities.get(kid)).map { auth =>
         println(s"auth: ${auth}")
         val decoded = JWT.require(Algorithm.ECDSA256(auth.asInstanceOf[ECPublicKey], null)).acceptLeeway(10).build().verify(svid.getToken)
