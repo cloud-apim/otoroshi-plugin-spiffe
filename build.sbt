@@ -17,6 +17,7 @@ lazy val root = (project in file("."))
     ),
     assembly / test  := {},
     assembly / assemblyJarName := "otoroshi-plugin-spiffe-assembly_3-dev.jar",
+    assembly / assemblyPackageScala / assembleArtifact := false,
     assembly / assemblyMergeStrategy := {
       case PathList("io", "spiffe", _ @ _*)                               => MergeStrategy.first
       case PathList(ps @ _*) if ps.contains("module-info.class")          => MergeStrategy.first
