@@ -38,7 +38,7 @@ lazy val root = (project in file("."))
       case path                                                          => MergeStrategy.defaultMergeStrategy(path)
     },
     libraryDependencies ++= Seq(
-      "fr.maif" %% "otoroshi" % "18.0.0-preview9" % "provided",
+      "fr.maif" %% "otoroshi" % "18.0.0-rc1" % "provided",
       "io.spiffe" % "java-spiffe-core" % spiffeVersion,
       "io.spiffe" % "grpc-netty-macos-aarch64" % spiffeVersion,
       "io.spiffe" % "grpc-netty-macos" % spiffeVersion,
